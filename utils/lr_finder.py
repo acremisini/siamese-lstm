@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 import matplotlib.pyplot as plt
 import os
 from utils.globals import Globals as glob
-
+import numpy as np
 
 class LRFinder(object):
     """Learning rate range test.
@@ -147,14 +147,14 @@ class LRFinder(object):
 
         # inputs = inputs.to(self.device)
         # labels = labels.to(self.device)
-        batch.s1 = batch.s1.to(self.device)
-        batch.s2 = batch.s2.to(self.device)
-        batch.label = batch.label.to(self.device)
+        # batch.s1 = batch.s1.to(self.device)
+        # batch.s2 = batch.s2.to(self.device)
+        batch.label = (batch.label-1)/4.0
 
         # Forward pass
         self.optimizer.zero_grad()
-        outputs = self.model.forward(batch=batch, is_singleton=False if len(batch.label) > 1 else True)
-        loss = self.model.get_loss(y_pred=outputs, y=batch.label, is_test=False)
+        outputs = self.model.forward(batch=batch)
+        loss = self.model.get_loss(y_pred=outputs, y=batch.label)
 
         # Backward pass
         loss.backward()
@@ -196,9 +196,9 @@ class LRFinder(object):
                 batch.label = batch.label.to(self.device)
 
                 # Forward pass and loss computation
-                outputs = self.model.forward(batch=batch, is_singleton=False if len(batch.label) > 1 else True)
-                loss = self.model.get_loss(y_pred=outputs, y=batch.label, is_test=False)
-                running_loss += loss.item() * batch.s1.size(1)
+                outputs = self.model.forward(batch=batch)
+                loss = self.model.get_loss(y_pred=outputs, y=batch.label)
+                running_loss += loss.item() #* batch.s1.size(1)
 
         return running_loss / len(dataloader.dataset)
 
@@ -232,9 +232,13 @@ class LRFinder(object):
         plt.plot(lrs, losses)
         if log_lr:
             plt.xscale("log")
-        plt.xlabel("Learning rate")
+            plt.xlabel("log(Learning rate)")
+        else:
+            plt.xlabel("Learning rate")
+            plt.xticks(np.arange(min(lrs),max(lrs)+0.01,.05))
+        print(lrs)
         plt.ylabel("Loss")
-        plt.savefig(os.path.join(glob.plots_dir, 'lr_search.png'))
+        plt.savefig(os.path.join(glob.plots_dir, 'lr_search.pdf'))
         plt.show()
 
 

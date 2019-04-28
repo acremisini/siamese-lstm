@@ -19,51 +19,54 @@ class Loops():
         self.epochs_without_improvement = 0
         self.total_loss = []
 
-    def train_loop(self,batches,model,num_epochs,proc_name,early_stopping,lr_search=False):
+    def lr_search(self, model, batches, val_batches, end_lr, num_iter, step_mode, log):
+        lr_finder = LRFinder(model, model.optimizer, nn.MSELoss(), device="cuda")
+        lr_finder.range_test(batches, val_loader=val_batches, end_lr=end_lr, num_iter=num_iter, step_mode=step_mode)
+        lr_finder.plot(log_lr=False)
+
+    def train_loop(self,batches,val_batches,model,num_epochs,proc_name):
         print('\n**********************************')
         print(proc_name.upper() + '\n')
 
-        # load validation set
-        if glob.debug is None:
-            dl = DataLoader()
-            _, val_batch_list = dl.load_data(corpus_names=['stsval.p'],is_train=False)
-            val_batches = val_batch_list[0]
-
-        # learning rate search
-        if lr_search:
-            lr_finder = LRFinder(model, model.optimizer, nn.MSELoss(), device="cuda")
-            lr_finder.range_test(batches,val_loader=val_batches if glob.debug is None else None,end_lr=1e-7, num_iter=100, step_mode="exp")
-            #lr_finder.range_test(batches,val_loader=val_batches,end_lr=100, num_iter=100)
-            lr_finder.plot(log_lr=True)
-
         best_epoch = 0
         best_score = 1
+        best_state_dict = dict()
+        train_loss_list = []
+        weighted_val_loss_list = []
+        val_loss_list = []
         for epoch in range(num_epochs):
+            # shuffle batches
+            batches.init_epoch()
 
             epoch_loss = []
             i = 0
-            for batch in iter(batches):
+            for batch in batches:
+
                 running_loss = []
 
-                # get data for this batch
-                batch.s1 = batch.s1.to(glob.device)
-                batch.s2 = batch.s2.to(glob.device)
-                batch.label = batch.label.to(glob.device)
+                # pad data for this batch
+                # padded = self.pad_batch(batch)
+                # batch.s1 = padded[0]
+                # batch.s2 = padded[1]
+
+                batch.label = ((batch.label - 1) / 4.0)
 
                 # empty gradients
                 model.optimizer.zero_grad()
 
                 # get prediction
-                y_pred = model.forward(batch=batch, is_singleton=False if len(batch.label) > 1 else True)
+                y_pred = model.forward(batch=batch)
 
                 # get loss
-                # is_test = False, so batch.label will be scaled to [0,1]
-                loss = model.get_loss(y_pred=y_pred, y=batch.label, is_test=False)
+                loss = model.get_loss(y_pred=y_pred, y=batch.label)
                 epoch_loss.append(loss.data.item())
                 running_loss.append(loss.data.item())
 
                 # back-propagate loss
                 loss.backward()
+
+                # average gradients
+                # model.avg_gradients()
 
                 # step
                 model.optimizer.step()
@@ -74,52 +77,53 @@ class Loops():
                           (proc_name,epoch, i, i - glob.report_freq, running_avg_loss))
                 i += 1
 
-            avg_training_accuracy = sum(epoch_loss) / len(epoch_loss)
-            print('\nAverage %s batch loss at epoch %d: %.16f \n' % (proc_name, epoch, avg_training_accuracy))
+                if hasattr(model, 'scheduler'):
+                    if 'CyclicLR' in str(type(model.scheduler)):
+                        model.scheduler.batch_step()
+            # epoch_i done, process:
+
+            avg_training_loss = sum(epoch_loss) / len(epoch_loss)
+            train_loss_list.append((epoch, avg_training_loss))
+            print('\nAverage %s batch loss at epoch %d: %.16f \n' % (proc_name, epoch, avg_training_loss))
 
             # lr update and improvement checking
             print('======')
-            if glob.debug is None:
+            model.eval()
+            val_loss = self.eval_loop(batches=val_batches, epoch_num=epoch, model=model)
+            model.train()
 
-                model.eval()
-                val_loss = self.eval_loop(batches=val_batches, epoch_num=epoch, model=model)
-                model.train()
-            else:
-                val_loss = avg_training_accuracy
+            weighted_val = (val_loss + avg_training_loss*glob.val_weight) / 2.0
+            val_loss_list.append((epoch,val_loss))
 
-            if 'CyclicLR' in str(type(model.scheduler)):
-                model.scheduler.batch_step()
-            elif 'Adadelta' not in str(type(model.optimizer)):
-                model.scheduler.step(val_loss)
-            if val_loss < best_score:
-                best_score = val_loss
+            if weighted_val < best_score:
+                best_score = weighted_val
                 best_epoch = epoch
+                best_state_dict = model.state_dict()
+            weighted_val_loss_list.append((epoch, weighted_val))
             print('\nBest epoch was', abs(best_epoch - epoch),'epochs ago','({0})'.format(best_score))
-            if abs(best_epoch - epoch) > glob.patience:
+
+            patience = glob.pre_train_patience if 'pre' in proc_name.lower() else glob.train_patience
+            if abs(best_epoch - epoch) > patience:
                 print('Exiting early due to lack of progress, best validated epoch is {0}, with score {1}'.format(best_epoch, best_score))
+                model.load_state_dict(best_state_dict)
                 break
             print('======\n')
 
-            # epoch_i done
-
         print('\n-----> %s procedure concluded after %d epochs total. Best validated epoch: %d.'
               % (proc_name, epoch, best_epoch))
+        return [train_loss_list,val_loss_list,weighted_val_loss_list]
 
     def eval_loop(self,batches,epoch_num,model):
-        # print('\n**********************************')
+
         print('EVAL')
-        # print('Running eval loop...')
+
         total_valid_loss = list()
 
         for batch in iter(batches):
-            batch.s1 = batch.s1.to(glob.device)
-            batch.s2 = batch.s2.to(glob.device)
-            batch.label = batch.label.to(glob.device)
-            # have to rescale here
-            batch.label = (batch.label - 1) / 4.0
+            batch.label = ((batch.label - 1) / 4.0)
 
-            y_pred = model.forward(batch=batch, is_singleton=True)
-            loss = model.get_loss(y_pred, batch.label, is_test=True)
+            y_pred = model.forward(batch=batch)
+            loss = model.get_loss(y_pred, batch.label)
             total_valid_loss.append(loss.item())
 
 
@@ -137,70 +141,127 @@ class Loops():
     # regression model
     # with a reg_model passed in, we must use it to send [0,1] predictions given by model
     # to [1,5]
-    def test_loop(self,batches,model,reg_model=None):
-        preds = []
-        y = []
-        y_plot = []
-        pred_plot = []
+    def make_reg_dataset(self, batches, model, reg_model=None):
 
         print('\n**********************************')
-        if reg_model is None:
-            print('REGRESSION\n')
-        else:
-            print('TEST\n')
-        i = 1
-        X = []
+        print('CONSTRUCTING REGRESSION DATASET\n')
+
+        y_hat = []
+        y = []
+
         for batch in iter(batches):
-            # get data for sentences and label
-            batch.s1 = batch.s1.to(glob.device)
-            batch.s2 = batch.s2.to(glob.device)
-            batch.label = batch.label.to(glob.device)
+            y_hat += model.forward(batch=batch).tolist()
+            y += batch.label.tolist()
 
-            # make prediction
-            y_pred = model.forward(batch=batch, is_singleton=True)
-
-            if reg_model:
-                # use model to scale model's [0,1] prediction to [1,5]
-                y_pred = np.clip(reg_model.predict(y_pred.cpu().detach().numpy().reshape(1, -1)), a_min=1, a_max=5)
-
-            preds.append(y_pred)
-            y.append(batch.label)
-
-            X.append(i)
-            i += 1
-
-        if reg_model is None:
-            preds_np = np.array([float(p_i.cpu().detach().numpy()) for p_i in preds])
-        else:
-            preds_np = np.array([p_i[0] for p_i in preds])
-
-        y_np = np.array([float(y_i.cpu().detach().numpy()) for y_i in y])
-
-        # calculate results
-        pearson = meas.pearsonr(preds_np,y_np)[0]
-        spearman = meas.spearmanr(y_np, preds_np)[0]
-        if reg_model is None:
-            y_np_scale = [(y_i-1)/4 for y_i in y_np]
-            mse = np.mean(np.square(y_np_scale - preds_np))
-        else:
-            mse = np.mean(np.square(y_np - preds_np))
+        # calculate results (for reference)
+        X = np.array(list(range(len(y_hat))))
+        y_scaled = [(y_i -1)/4.0 for y_i in y]
+        pearson = meas.pearsonr(y_hat,y_scaled)[0]
+        spearman = meas.spearmanr(y_hat,y_scaled)[0]
+        mse = np.mean(np.square(np.subtract(y_hat,y_scaled)))
 
         # report results
         print('===================================================\n')
-        print('''Testing procedure concluded, final results are {0}:\n
+        print('''Testing procedure concluded, overfit results are {0}:\n
               Pearson: {1},\n
               Spearman: {2},\n
               MSE: {3},
-              '''.format('[0,1]' if reg_model is None else '[1,5]',pearson,spearman,mse))
+              '''.format('[0,1]',pearson,spearman,mse))
+        print('===================================================')
+
+        #plot
+        plt.xlabel('Test Sample')
+        plt.ylabel('Similarity')
+        plt.scatter(x=X,y=y_scaled,
+                    color='red',
+                    marker = "o",
+                    s=0.3,
+                    label='Labels')
+        plt.scatter(x=X,y=y_hat,
+                    color='blue',
+                    s=0.5,
+                    marker = 0,
+                    label='Predictions')
+        plt.legend(loc='lower right')
+        plt.savefig(os.path.join(glob.plots_dir,'{0}_plot_w-{1}_lr-{2}_{3}.pdf').format(glob.model_name,
+                                                                                        glob.val_weight,
+                                                                                        glob.learning_rate,
+                                                                                        '0-1'))
+
+        plt.close()
+
+        y_hat = np.array(y_hat).reshape(-1,1)
+        y = np.array(y).reshape(len(y),)
+
+        return [[y_hat,y], {'pearson': pearson,
+                            'spearman':spearman,
+                            'mse':mse}]
+
+    def reg_test_loop(self, batches, model, reg_model):
+
+        print('\n**********************************')
+        print('TEST\n')
+
+        y_hat = []
+        y = []
+
+        # get (y_hat, y)
+        for batch in iter(batches):
+            y_hat += model.forward(batch=batch).tolist()
+            y += batch.label.tolist()
+
+        # calculate performance
+        y_hat = np.clip(reg_model.predict(np.array(y_hat).reshape(-1,1)),a_min=1.0,a_max=5.0)
+        X = np.array(list(range(len(y_hat))))
+        pearson = meas.pearsonr(y_hat,y)[0]
+        spearman = meas.spearmanr(y_hat, y)[0]
+        mse = np.mean(np.square(np.subtract(y_hat, y)))
+
+
+        # report results
+        print('===================================================\n')
+        print('''Testing procedure concluded, results are {0}:\n
+              Pearson: {1},\n
+              Spearman: {2},\n
+              MSE: {3},
+              '''.format('[1,5]',pearson,spearman,mse))
         print('===================================================')
 
         #plot
         X = np.array(X)
-        plt.xlabel('test sample')
-        plt.ylabel('similarity')
-        plt.scatter(x=X,y=y_np if reg_model else y_np_scale,color='red',s=0.1)
-        plt.scatter(x=X,y=preds_np,color='blue',s=0.05)
-        plt.savefig(os.path.join(glob.plots_dir,'results_' + str(reg_model)[0:4] + '.png'))
-        plt.close()
+        plt.xlabel('Test Sample')
+        plt.ylabel('Similarity')
+        plt.scatter(x=X,y=y,
+                    color='red',
+                    marker = "o",
+                    s=0.3,
+                    label='Labels')
+        plt.scatter(x=X,y=y_hat,
+                    color='blue',
+                    s=0.5,
+                    marker = 0,
+                    label='Predictions')
+        plt.legend(loc='lower right')
+        plt.savefig(os.path.join(glob.plots_dir,'{0}_plot_w-{1}_lr-{2}_{3}.pdf').format(glob.model_name,
+                                                                                        glob.val_weight,
+                                                                                        glob.learning_rate,
+                                                                                        '1-5'))
 
-        return preds_np.reshape(-1,1),y_np.reshape((len(y_np),))
+        plt.close()
+        # [y_hat.reshape(-1, 1), y.reshape((len(y),))]
+
+        return {'pearson': pearson,
+                'spearman':spearman,
+                'mse':mse}
+
+
+    def pad_batch(self, batch):
+        max_len = max(f.size(0) for f in [batch.s1, batch.s2])
+        padded = []
+        for sent in [batch.s1, batch.s2]:
+            if sent.size(0) < max_len:
+                pad_size = [max_len - sent.size(0), sent.size(1)]
+                pad = torch.ones(pad_size).long().to(glob.device)
+                sent = torch.cat((sent, pad))
+            padded.append(sent)
+        return padded

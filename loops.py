@@ -200,7 +200,7 @@ class Loops():
     def reg_test_loop(self, batches, model, reg_model):
 
         print('\n**********************************')
-        print('TEST\n')
+        print('TEST (1-5)\n')
 
         y_hat = []
         y = []
@@ -225,6 +225,64 @@ class Loops():
               Spearman: {2},\n
               MSE: {3},
               '''.format('[1,5]',pearson,spearman,mse))
+        print('===================================================')
+
+        #plot
+        X = np.array(X)
+        plt.xlabel('Test Sample')
+        plt.ylabel('Similarity')
+        plt.scatter(x=X,y=y,
+                    color='red',
+                    marker = "o",
+                    s=0.3,
+                    label='Labels')
+        plt.scatter(x=X,y=y_hat,
+                    color='blue',
+                    s=0.5,
+                    marker = 0,
+                    label='Predictions')
+        plt.legend(loc='lower right')
+        plt.savefig(os.path.join(glob.plots_dir,'{0}_plot_w-{1}_lr-{2}_{3}.pdf').format(glob.model_name,
+                                                                                        glob.val_weight,
+                                                                                        glob.learning_rate,
+                                                                                        '1-5'))
+
+        plt.close()
+        # [y_hat.reshape(-1, 1), y.reshape((len(y),))]
+
+        return {'pearson': pearson,
+                'spearman':spearman,
+                'mse':mse}
+
+    def zero_one_test_loop(self, batches, model):
+        print('\n**********************************')
+        print('TEST (0-1)\n')
+
+        y_hat = []
+        y = []
+
+        # get (y_hat, y)
+        for batch in iter(batches):
+            y_hat += model.forward(batch=batch).tolist()
+            y += batch.label.tolist()
+
+        # calculate performance
+        y_hat = np.array(y_hat).reshape(-1, 1)
+        y = (np.array(y).reshape(-1,1) - 1) / 4.0
+
+        X = np.array(list(range(len(y_hat))))
+        pearson = meas.pearsonr(y_hat, y)[0]
+        spearman = meas.spearmanr(y_hat, y)[0]
+        mse = np.mean(np.square(np.subtract(y_hat, y)))
+
+
+        # report results
+        print('===================================================\n')
+        print('''Testing procedure concluded, results are {0}:\n
+              Pearson: {1},\n
+              Spearman: {2},\n
+              MSE: {3},
+              '''.format('[0,1]',pearson,spearman,mse))
         print('===================================================')
 
         #plot

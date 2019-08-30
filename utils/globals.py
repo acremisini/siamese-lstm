@@ -15,16 +15,16 @@ class Globals():
     hidden_dims = 50
     pre_train_batch_size = 32
     train_batch_size = 32
-    test_batch_size = 256 # 4619
+    test_batch_size = 4627 # 4619
     clip_value = 0.25
     learning_rate = 0.9#0.001 # 1e-2
     val_weight = 0.45
     max_lr = 0.005
     beta_1 = 0.1
     bi_dir = False
-    model_name = 'sig-avg-val-new'
+    model_name = 'l1'
     num_layers = 1
-    dropout = 0.4 if num_layers > 1 else 0
+    dropout = 0.2 if num_layers > 1 else 0
 
     # Training
     overfit_data_size=None

@@ -216,7 +216,7 @@ class DataLoader():
             elif 'test' in corpus_names[corpus_idx]:
                 batches = torchtext.data.BucketIterator(dataset=this_data,
                                                         batch_size=glob.test_batch_size,
-                                                  sort=False,
+                                                        sort=False,
                                                         # sort_key=sort_key,
                                                         device=glob.device)
                 batch_dict['test'] = batches
@@ -278,17 +278,3 @@ class DataLoader():
             print('--------------------\n')
 
         return (text_field.vocab, batch_dict)
-
-
-# probably don't need this, leaving here for now
-# self.s1 = [w for w in sample[0].split(' ')]
-# try:
-#     self.s1[-1] = self.s1[-1] if self.s1[-1][-1] != '.' else self.s1[-1][:-1]
-# except IndexError:
-#     pass
-
-# self.s2 = [w for w in sample[1].split(' ')]
-# try:
-#     self.s2[-1] = self.s2[-1] if self.s2[-1][-1] != '.' else self.s2[-1][:-1]
-# except IndexError:
-#     pass

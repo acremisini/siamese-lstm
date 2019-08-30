@@ -10,8 +10,8 @@ import resource
 max_rec = 0x100000
 resource.setrlimit(resource.RLIMIT_STACK, [0x100 * max_rec, resource.RLIM_INFINITY])
 sys.setrecursionlimit(max_rec)
-
-train = True
+best_model = 'sig-avg_w-0.4_lr-0.9'
+train = False
 lr_search = False
 
 torch.cuda.manual_seed(1)
@@ -34,7 +34,7 @@ loops = Loops()
 # must be pretrain_clean and val_clean if validate (val_clean is subset of pretrain)
 # otherwise just pretrain
 if glob.pre_train:
-    vocab, batch_dict = dl.load_data(corpus_names=['stspretrain.p', 'ststrain_new.p', 'ststest.p', 'stsval_new.p'])
+    vocab, batch_dict = dl.load_data(corpus_names=['stspretrain_clean.p', 'ststrain_new.p', 'ststest.p', 'stsval_clean.p'])
 else:
     vocab, batch_dict = dl.load_data(corpus_names=['ststrain_new.p', 'ststest.p', 'stsval_clean.p'])
 
@@ -43,20 +43,11 @@ train_batches = batch_dict['train']
 test_batches = batch_dict['test']
 val_batches = batch_dict['val'] if 'val' in batch_dict else None
 
-lrs = [0.9, 0.95]
-val_weight = [0.5, 0.55, 0.6]
-
-# for lr in lrs:
-#     for weight in val_weight:
-#         glob.learning_rate = lr
-#         glob.val_weight = weight
-#         print('lr: ' + str(glob.learning_rate))
-#         print('weight: ' + str(glob.val_weight))
 
 if train:
     # initialize model
     model = SiameseLSTM(vocab).to(glob.device)
-    print('Running computation on device:',glob.device)
+    print('Running computation on device:', glob.device)
 
     if lr_search:
         loops.lr_search(model=model,
@@ -98,52 +89,59 @@ if train:
 
 else:
     model = SiameseLSTM(vocab).to(glob.device)
-    load_network(network = model, path='models/{0}_model'.format(glob.model_name))
+    load_network(network = model, path='models/{0}'.format(best_model))
 
-with torch.no_grad():
+skip = True
 
-    # make regression dataset
-    results = loops.make_reg_dataset(batches=train_batches, model=model)
-    y_pred, y = results[0][0], results[0][1]
+if not skip:
+    with torch.no_grad():
 
-    save_results(results[1], '{0}_performance_w-{1}_lr-{2}_0-1.csv'.format(glob.model_name,
-                                                                           glob.val_weight,
-                                                                           glob.learning_rate))
-    # fit regression model
+        # make regression dataset
+        results = loops.make_reg_dataset(batches=train_batches, model=model)
+        y_pred, y = results[0][0], results[0][1]
 
-    load_reg = False
-    svr_path = os.path.join(glob.models_dir, '{0}_sim-svr_w-{1}_lr-{2}'.format(glob.model_name,
+        save_results(results[1], '{0}_performance_w-{1}_lr-{2}_0-1.csv'.format(glob.model_name,
                                                                                glob.val_weight,
                                                                                glob.learning_rate))
+        # fit regression model
 
-    if load_reg:
-        print('Loading regression model')
-        sim_svr = pickle.load(open(svr_path, 'rb'), encoding='utf-8')
-        print('..... Done')
-    else:
-        sim_svr = GridSearchCV(SVR(kernel='rbf', gamma=3.1), cv = 5,param_grid={"C": [1e0, 1e1, 1e2, 1e3], "gamma": np.logspace(-2, 2, 5)})
-        print('Fitting regression model...')
-        sim_svr.fit(X=y_pred, y=y)
-        print('Done, saving')
+        load_reg = False
+        svr_path = os.path.join(glob.models_dir, '{0}_sim-svr_w-{1}_lr-{2}'.format(glob.model_name,
+                                                                                   glob.val_weight,
+                                                                                   glob.learning_rate))
 
-        with open(svr_path, 'wb') as f:
-            pickle.dump(sim_svr, f)
-        print('Trained SVR model saved to %s' % svr_path)
+        if load_reg:
+            print('Loading regression model')
+            sim_svr = pickle.load(open(svr_path, 'rb'), encoding='utf-8')
+            print('..... Done')
+        else:
+            sim_svr = GridSearchCV(SVR(kernel='rbf', gamma=3.1), cv = 5,param_grid={"C": [1e0, 1e1, 1e2, 1e3], "gamma": np.logspace(-2, 2, 5)})
+            print('Fitting regression model...')
+            sim_svr.fit(X=y_pred, y=y)
+            print('Done, saving')
+
+            with open(svr_path, 'wb') as f:
+                pickle.dump(sim_svr, f)
+            print('Trained SVR model saved to %s' % svr_path)
 
 
-    # Test
-    results = loops.reg_test_loop(batches=test_batches,
-                                  model=model,
-                                  reg_model=sim_svr)
+        # Test
+        results = loops.reg_test_loop(batches=test_batches,
+                                      model=model,
+                                      reg_model=sim_svr)
 
-    save_results(results, '{0}_performance_w-{1}_lr-{2}_1-5.csv'.format(glob.model_name,
-                                                                        glob.val_weight,
-                                                                        glob.learning_rate))
-    # Save
-    print('\n')
-    save_network(network=model,
-                 network_label='{0}_w-{1}_lr-{2}'.format(glob.model_name,
-                                                         glob.val_weight,
-                                                         glob.learning_rate),
-                 active_epoch='N',
-                 save_directory=glob.models_dir)
+        save_results(results, '{0}_performance_w-{1}_lr-{2}_1-5.csv'.format(glob.model_name,
+                                                                            glob.val_weight,
+                                                                            glob.learning_rate))
+        # Save
+        print('\n')
+        save_network(network=model,
+                     network_label='{0}_w-{1}_lr-{2}'.format(glob.model_name,
+                                                             glob.val_weight,
+                                                             glob.learning_rate),
+                     active_epoch='N',
+                     save_directory=glob.models_dir)
+else:
+    with torch.no_grad():
+        results = loops.zero_one_test_loop(batches=test_batches,
+                                           model=model)

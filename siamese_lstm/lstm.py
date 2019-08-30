@@ -115,7 +115,8 @@ class SiameseLSTM(nn.Module):
         self.optimizer = optim.Adadelta(params=self.lstm.parameters(),
                                         lr=glob.learning_rate,
                                         rho=0.95,
-                                        eps=1e-6)
+                                        eps=1e-6,
+                                        weight_decay=0.0001)
         # self.scheduler = CyclicLR(self.optimizer,
         #                           base_lr=glob.learning_rate,
         #                           max_lr=glob.max_lr,
@@ -155,14 +156,11 @@ class SiameseLSTM(nn.Module):
                                                     cell=cell_b_t)
 
         # Get similarity predictions:
-        if glob.num_layers > 1:
-            dif = hidden_a_t[-1].squeeze() - hidden_b_t[-1].squeeze()
-        else:
-            dif = hidden_a_t.squeeze() - hidden_b_t.squeeze()
+        dif = hidden_a_t.squeeze() - hidden_b_t.squeeze()
 
         norm = torch.norm(dif,
                           p=1,
-                          dim=1 if dif.dim() > 1 else 0)
+                          dim=0)
         y_hat = torch.exp(-norm)
         y_hat = torch.clamp(y_hat, min=1e-7, max=1.0 - 1e-7)
 

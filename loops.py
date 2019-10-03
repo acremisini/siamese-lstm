@@ -34,6 +34,7 @@ class Loops():
         train_loss_list = []
         weighted_val_loss_list = []
         val_loss_list = []
+        model.init_hidden()
         for epoch in range(num_epochs):
             # shuffle batches
             batches.init_epoch()
@@ -43,11 +44,6 @@ class Loops():
             for batch in batches:
 
                 running_loss = []
-
-                # pad data for this batch
-                # padded = self.pad_batch(batch)
-                # batch.s1 = padded[0]
-                # batch.s2 = padded[1]
 
                 batch.label = ((batch.label - 1) / 4.0)
 
@@ -265,10 +261,10 @@ class Loops():
         for batch in iter(batches):
             y_hat += model.forward(batch=batch).tolist()
             y += batch.label.tolist()
-
+        print(y_hat)
         # calculate performance
         y_hat = np.array(y_hat).reshape(-1, 1)
-        y = (np.array(y).reshape(-1,1) - 1) / 4.0
+        y = (np.array(y).reshape(-1, 1) - 1) / 4.0
 
         X = np.array(list(range(len(y_hat))))
         pearson = meas.pearsonr(y_hat, y)[0]

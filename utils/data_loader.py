@@ -57,7 +57,7 @@ class DataLoader():
         self.vectors = torchtext.vocab.Vectors(name='GoogleNews-vectors-negative300.txt', cache=glob.data_dir)
         self.tests = TestData()
 
-    def load_data(self, corpus_names, for_reg_model = False):
+    def load_data(self, corpus_names, for_reg_model=False):
         words = set()
         data = []
         cutoffs = []
@@ -68,9 +68,11 @@ class DataLoader():
         # load all data
 
         for corpus in corpus_names:
+
             path = os.path.join(glob.data_dir, corpus)
             # load data
             d = pickle.load(open(path, 'rb'), encoding='utf-8')
+
             # add samples
             for row in d:
                 sample = data_row(row)
@@ -147,16 +149,16 @@ class DataLoader():
             if glob.overfit_data_size:
                 this_data = data
             else:
-                this_data = torchtext.data.Dataset(examples=data[ cutoffs[corpus_idx][0] : cutoffs[corpus_idx][1] ], fields=fields)
-
+                this_data = torchtext.data.Dataset(examples=data[cutoffs[corpus_idx][0]:cutoffs[corpus_idx][1]],
+                                                   fields=fields)
 
             # pre-train
             if 'pre' in corpus_names[corpus_idx]:
                 batches = torchtext.data.BucketIterator(dataset=this_data,
-                                                  batch_size=glob.pre_train_batch_size,
-                                                  sort=False,
-                                                  #sort_key=sort_key,
-                                                  device=glob.device)
+                                                        batch_size=glob.pre_train_batch_size,
+                                                        sort=False,
+                                                        #sort_key=sort_key,
+                                                        device=glob.device)
 
                 batch_dict['pre_train'] = batches
 
@@ -185,8 +187,8 @@ class DataLoader():
             # train
             elif 'train' in corpus_names[corpus_idx]:
                 batches = torchtext.data.BucketIterator(dataset=this_data,
-                                                  batch_size=glob.train_batch_size if not for_reg_model else glob.test_batch_size,
-                                                  sort=False,
+                                                        batch_size=glob.train_batch_size if not for_reg_model else glob.test_batch_size,
+                                                        sort=False,
                                                         # sort_key=sort_key,
                                                         device=glob.device)
                 batch_dict['train'] = batches
@@ -216,9 +218,13 @@ class DataLoader():
             elif 'test' in corpus_names[corpus_idx]:
                 batches = torchtext.data.BucketIterator(dataset=this_data,
                                                         batch_size=glob.test_batch_size,
-                                                        sort=False,
-                                                        # sort_key=sort_key,
+                                                        sort=True,
+                                                        sort_key=sort_key,
                                                         device=glob.device)
+                one = batches.dataset.examples.__getitem__(0)
+                print(one.s1)
+                print(one.s2)
+                print((one.label - 1) / 4.0)
                 batch_dict['test'] = batches
 
                 # unit test

@@ -15,6 +15,7 @@ from unit_tests.test_data import TestData
 if 'cuda' in glob.device:
     glob.use_gpu
 
+
 class LSTM(nn.Module):
 
     def __init__(self, vocab):
@@ -38,6 +39,7 @@ class LSTM(nn.Module):
 
     def initialize_parameters(self):
         """ Initializes network parameters. """
+
         state_dict = self.lstm.state_dict()
         for key in state_dict.keys():
             if 'weight' in key:
@@ -45,7 +47,7 @@ class LSTM(nn.Module):
                 embed_dim = state_dict[key].size(1)
                 # W
                 if 'ih' in key:
-                    state_dict[key] = Variable(torch.nn.init.normal_(state_dict[key],mean=0,std=.2) / torch.sqrt(torch.from_numpy(np.array(hidden_dim*embed_dim))))
+                    state_dict[key] = Variable(torch.nn.init.normal_(state_dict[key],mean=0, std=.2) / torch.sqrt(torch.from_numpy(np.array(hidden_dim*embed_dim))))
                 # U
                 elif 'hh' in key:
                     state_dict[key] = Variable(torch.nn.init.normal_(state_dict[key], mean=0, std=.2) / torch.sqrt(torch.from_numpy(np.array(hidden_dim))))
@@ -53,7 +55,7 @@ class LSTM(nn.Module):
             if 'bias' in key:
                 hidden_dim = Variable((torch.tensor(state_dict[key].size(0) / 4).long()))
                 # from paper
-                state_dict[key] = Variable(torch.nn.init.uniform_(state_dict[key], a=-0.5,b=0.5))
+                state_dict[key] = Variable(torch.nn.init.uniform_(state_dict[key], a=-0.5, b=0.5))
                 # paper says 2.5, their code has 1.5
                 state_dict[key][hidden_dim:hidden_dim*2] = Variable(torch.tensor([2.5]))
 
@@ -61,20 +63,15 @@ class LSTM(nn.Module):
 
     def init_hidden(self, batch_size):
         # The axes semantics are (num_layers, minibatch_size, hidden_dim)
-
-        h = torch.zeros(glob.num_layers,batch_size,glob.hidden_dims).to(glob.device)
+        h = torch.zeros(glob.num_layers, batch_size, glob.hidden_dims).to(glob.device)
         h = Variable(torch.nn.init.normal_(h, mean=0, std=.01).to(glob.device))
-        #h = Variable(torch.nn.init.xavier_normal_(h).to(glob.device))
+        # h = Variable(torch.nn.init.xavier_normal_(h).to(glob.device))
 
-        c = torch.zeros(glob.num_layers,batch_size,glob.hidden_dims).to(glob.device)
+        c = torch.zeros(glob.num_layers, batch_size, glob.hidden_dims).to(glob.device)
         c = Variable(torch.nn.init.normal_(c, mean=0, std=.01).to(glob.device))
-        #c = Variable(torch.nn.init.xavier_normal_(c).to(glob.device))
+        # c = Variable(torch.nn.init.xavier_normal_(c).to(glob.device))
 
-        # force model to learn initial states
-        # init_hidden = nn.Parameter(torch.randn(glob.num_layers,batch_size,glob.hidden_dims).type(torch.FloatTensor), requires_grad=True).to(glob.device)
-        # init_cell = nn.Parameter(torch.randn(glob.num_layers, batch_size, glob.hidden_dims).type(torch.FloatTensor),requires_grad=True).to(glob.device)
-
-        return h,c
+        return h, c
 
     def forward(self, words_idx, batch_size, hidden, cell):
         """ batch_size words are fed in parallel to the network, with shape (1xbatch_size).
@@ -87,13 +84,11 @@ class LSTM(nn.Module):
                                              words_idx=words_idx,
                                              vocab=self.vocab)
 
-        embeds = embeds.view(1, batch_size, self.embedding_dim)
-
+        embeds = embeds.view(-1, batch_size, self.embedding_dim)
 
         output, (hidden,cell) = self.lstm(embeds, (hidden,cell))
 
         return output, hidden, cell
-
 
 
 class SiameseLSTM(nn.Module):
@@ -105,9 +100,6 @@ class SiameseLSTM(nn.Module):
 
         # Initialize one lstm, this will by default share variables across inputs
         self.lstm = LSTM(self.vocab)
-        # self.lstm_b = LSTM(self.vocab)
-
-        # self.lstm_b.load_state_dict(self.lstm_a.state_dict())
 
         # Define loss function
         self.loss_function = nn.MSELoss()
@@ -122,7 +114,6 @@ class SiameseLSTM(nn.Module):
         #                           max_lr=glob.max_lr,
         #                           step_size=60000,
         #                           mode='triangular2')
-
 
     def forward(self, batch):
         """ Perform forward pass through the network. """
@@ -139,16 +130,21 @@ class SiameseLSTM(nn.Module):
 
         # batches are of shape (sentence, num_batches)
 
+        #TODO: maybe weird batch size thing is showing itself here? maybe not??
         # run this batch through lstm_a
         hidden_a_t, cell_a_t = self.lstm.init_hidden(batch.s1.size(1))
+        print('h_a', hidden_a_t)
+        print('c_a', cell_a_t)
+        hidden_b_t, cell_b_t = self.lstm.init_hidden(batch.s2.size(1))
+        print('h_b', hidden_b_t)
+        print('c_b', cell_b_t)
         for t_i in range(batch.s1.size(0)):
             out_a, hidden_a_t, cell_a_t = self.lstm(words_idx=batch.s1[t_i, :],
-                                                    batch_size = batch.s1.size(1),
-                                                    hidden = hidden_a_t,
-                                                    cell = cell_a_t)
+                                                    batch_size=batch.s1.size(1),
+                                                    hidden=hidden_a_t,
+                                                    cell=cell_a_t)
 
         # run this batch through lstm_b
-        hidden_b_t, cell_b_t = self.lstm.init_hidden(batch.s2.size(1))
         for t_i in range(batch.s2.size(0)):
             out_b, hidden_b_t, cell_b_t = self.lstm(words_idx=batch.s2[t_i, :],
                                                     batch_size=batch.s2.size(1),
@@ -160,13 +156,11 @@ class SiameseLSTM(nn.Module):
 
         norm = torch.norm(dif,
                           p=1,
-                          dim=0)
+                          dim=dif.dim() - 1)
         y_hat = torch.exp(-norm)
         y_hat = torch.clamp(y_hat, min=1e-7, max=1.0 - 1e-7)
 
         return torch.reshape(y_hat, (-1,))
-
-
 
     def get_loss(self, y_pred, y):
         ''' Compute MSE between predictions and scaled gold labels '''
@@ -197,12 +191,3 @@ class SiameseLSTM(nn.Module):
                 elif 'lstm_b' in name:
                     param.grad.data = avg_grads[name.replace('lstm_b.lstm.', '')]
 
-# preds = [y.clone().cpu().detach().item() for y in y_pred]
-# gold = [i.clone().cpu().detach().item() for i in y]
-# pearson = meas.pearsonr(preds, gold)[0]
-# if pearson > 0.8:
-#     print(pearson)
-#     res = list(zip(preds,gold))
-#     for r in res:
-#         print(r[0], r[1])
-#     print('-----')

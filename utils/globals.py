@@ -15,7 +15,7 @@ class Globals():
     hidden_dims = 50
     pre_train_batch_size = 32
     train_batch_size = 32
-    test_batch_size = 4627 # 4619
+    test_batch_size = 4627 # 4627
     clip_value = 0.25
     learning_rate = 0.9#0.001 # 1e-2
     val_weight = 0.45
